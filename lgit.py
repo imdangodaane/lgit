@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import os
+import sys
 import argparse
 import hashlib
+import datetime
 
 
 def get_cmd():
@@ -35,7 +37,7 @@ def get_cmd():
     tree status')
     status_parser.add_argument('status', action='store_true')
 
-    ls_files_parser = sub_parsers.add_parser('ls_files', help='Show \
+    ls_files_parser = sub_parsers.add_parser('ls-files', help='Show \
     information about files in the index and the working tree')
     ls_files_parser.add_argument('ls_files', action='store_true')
 
@@ -60,6 +62,9 @@ def get_cmd():
         return 'ls_files', None
     if 'log' in args:
         return 'log', None
+    if len(vars(args)) < 1:
+        print('fatal: no command was added, add -h to know more')
+        sys.exit()
 
 
 def check_status():
@@ -67,18 +72,75 @@ def check_status():
 
 
 def add_a_file(file_name):
-    file_path = os.path.realpath(file_name)
+    # Open and get content from the file
     try:
         fd = os.open(file_name, os.O_RDONLY)
     except PermissionError:
         print('error: open("%s"): Permission denied' % file_name)
         print('error: unable to index file test')
         print('fatal: adding files failed')
+        sys.exit()
     except FileNotFoundError:
         print("fatal: pathspec '%s' did not match any files" % file_name)
+        sys.exit()
     file_content = os.read(fd, os.stat(file_name).st_size)
+    os.close(fd)
+    # Get SHA1 hash from the file (before add)
     file_sha1 = hashlib.sha1(file_content).hexdigest()
+    # Create directory contain file to store by SHA1 hash
+    try:
+        os.mkdir(os.path.join(objects_path, file_sha1[:2]))
+    except FileExistsError:
+        pass
+    try:
+        os.mknod(os.path.join(objects_path, file_sha1[:2], file_sha1[2:]))
+    except FileExistsError:
+        pass
+    # Write content to the file stored in lgit database
+    fd = os.open(os.path.join(objects_path, file_sha1[:2], file_sha1[2:]), \
+    os.O_WRONLY)
+    os.write(fd, file_content)
+    os.close(fd)
+    # Write file information to index
+    # Get timestamp of file
+    timestamp = os.stat(file_name).st_mtime
+    time = str(datetime.datetime.fromtimestamp(timestamp))[:19]
+    for i in time:
+        if not i.isnumeric():
+            time = time.replace(i, '')
+    # If file was not stage in index, write a new information for file
+    # If there're file informations in index, find index of timestamp,
+    # first SHA1, second SHA1,... and write new set of those
+    with open(index_path, 'r+') as f:
+        content = f.read()
+        index = None
+        init_info = str(time + ' ' + file_sha1 + ' ' + file_sha1 + ' ' + \
+        ' ' * 40 + ' ' + file_name + '\n')
+        if len(content) == 0:
+            f.write(init_info)
+        else:
+            lines = content.split('\n')
+            for line in lines:
+                if len(line) == 0:
+                    continue
+                if file_name == line.split()[-1]:
+                    index = content.find(line)
+                    break
+            if index:
+                fd = os.open(index_path, os.O_RDWR)
+                os.lseek(fd, index, 0)
+                os.write(fd, time.encode())
+                os.lseek(fd, index + 15, 0)
+                os.write(fd, file_sha1.encode())
+                os.lseek(fd, index + 56, 0)
+                os.write(fd, file_sha1.encode())
+                os.close(fd)
+            else:
+                f.write(init_info)
 
+
+def staging_index(file_name):
+    pass
 
 
 def check_and_commit():
@@ -88,8 +150,6 @@ def check_and_commit():
 def re_init():
     print('Reinitialized existing Git repository in %s'
           % os.path.realpath('.lgit'))
-
-
 def check_and_init():
     if os.path.exists('.lgit'):
         if os.path.isdir('.lgit'):
