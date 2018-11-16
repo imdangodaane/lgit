@@ -67,14 +67,10 @@ def get_cmd():
         sys.exit()
 
 
-def check_status():
-    pass
-
-
-def add_a_file(file_name):
+def get_sha1(file):
     # Open and get content from the file
     try:
-        fd = os.open(file_name, os.O_RDONLY)
+        fd = os.open(file, os.O_RDONLY)
     except PermissionError:
         print('error: open("%s"): Permission denied' % file_name)
         print('error: unable to index file test')
@@ -83,10 +79,59 @@ def add_a_file(file_name):
     except FileNotFoundError:
         print("fatal: pathspec '%s' did not match any files" % file_name)
         sys.exit()
-    file_content = os.read(fd, os.stat(file_name).st_size)
+    file_content = os.read(fd, os.stat(file).st_size)
     os.close(fd)
     # Get SHA1 hash from the file (before add)
-    file_sha1 = hashlib.sha1(file_content).hexdigest()
+    return hashlib.sha1(file_content).hexdigest()
+
+
+def get_content(file):
+    # Open and get content from the file
+    try:
+        fd = os.open(file, os.O_RDONLY)
+    except PermissionError:
+        print('error: open("%s"): Permission denied' % file_name)
+        print('error: unable to index file test')
+        print('fatal: adding files failed')
+        sys.exit()
+    except FileNotFoundError:
+        print("fatal: pathspec '%s' did not match any files" % file_name)
+        sys.exit()
+    return os.read(fd, os.stat(file).st_size)
+
+
+def get_readable_timestamp(file):
+    mtime = os.stat(file).st_mtime
+    timestamp = str(datetime.datetime.fromtimestamp(mtime))[:19]
+    for i in timestamp:
+        if not i.isnumeric():
+            timestamp = timestamp.replace(i, '')
+    return timestamp
+
+
+def get_info(file):
+    with open(file, 'r') as f:
+        content = f.read()
+        lines = content.split('\n')
+        for line in lines:
+            if len(line) > 0:
+                info = line.split()
+                yield info
+
+
+def lgit_status(index_path):
+    
+
+
+def lgit_add(file_name):
+    # Get file content
+    file_content = get_content(file_name)
+    # Get readable timestamp of file
+    time = get_readable_timestamp(file_name)
+    file_sha1 = get_sha1(file_name)
+    init_info = time + ' ' + file_sha1 + ' ' + file_sha1 + ' ' + ' ' * 40 + \
+    file_name + '\n'
+    index = None
     # Create directory contain file to store by SHA1 hash
     try:
         os.mkdir(os.path.join(objects_path, file_sha1[:2]))
@@ -101,42 +146,31 @@ def add_a_file(file_name):
     os.O_WRONLY)
     os.write(fd, file_content)
     os.close(fd)
-    # Write file information to index
-    # Get timestamp of file
-    timestamp = os.stat(file_name).st_mtime
-    time = str(datetime.datetime.fromtimestamp(timestamp))[:19]
-    for i in time:
-        if not i.isnumeric():
-            time = time.replace(i, '')
-    # If file was not stage in index, write a new information for file
-    # If there're file informations in index, find index of timestamp,
-    # first SHA1, second SHA1,... and write new set of those
-    with open(index_path, 'r+') as f:
-        content = f.read()
-        index = None
-        init_info = str(time + ' ' + file_sha1 + ' ' + file_sha1 + ' ' + \
-        ' ' * 40 + ' ' + file_name + '\n')
-        if len(content) == 0:
-            f.write(init_info)
+    # Write file information to index file
+    # If file was not stage in index, write a new information for file,
+    # if there're file informations in index, find index of informations
+    # and write new set of those
+    f = open(index_path, 'r+')
+    content = f.read()
+    if len(content) == 0:
+        f.write(init_info)
+    else:
+        for line in content.split('\n'):
+            if len(line) > 0 and file_name == line.split()[-1]:
+                index = content.find(line)
+                break
+        if index:
+            fd = os.open(index_path, os.O_RDWR)
+            os.lseek(fd, index + delta_timestamp, 0)
+            os.write(fd, time.encode())
+            os.lseek(fd, index + delta_1st_sha1, 0)
+            os.write(fd, file_sha1.encode())
+            os.lseek(fd, index + delta_2nd_sha1, 0)
+            os.write(fd, file_sha1.encode())
+            os.close(fd)
         else:
-            lines = content.split('\n')
-            for line in lines:
-                if len(line) == 0:
-                    continue
-                if file_name == line.split()[-1]:
-                    index = content.find(line)
-                    break
-            if index:
-                fd = os.open(index_path, os.O_RDWR)
-                os.lseek(fd, index, 0)
-                os.write(fd, time.encode())
-                os.lseek(fd, index + 15, 0)
-                os.write(fd, file_sha1.encode())
-                os.lseek(fd, index + 56, 0)
-                os.write(fd, file_sha1.encode())
-                os.close(fd)
-            else:
-                f.write(init_info)
+            f.write(init_info)
+    f.close()
 
 
 def staging_index(file_name):
@@ -193,25 +227,26 @@ def lgit_init():
 
 def main():
     global lgit_path, objects_path, commits_path, snapshots_path, \
-           index_path, config_path
-
+           index_path, config_path, delta_timestamp, delta_1st_sha1, \
+           delta_2nd_sha1, delta_3rd_sha1
     lgit_path = os.path.realpath('.lgit')
     objects_path = os.path.join(lgit_path, 'objects')
     commits_path = os.path.join(lgit_path, 'commits')
     snapshots_path = os.path.join(lgit_path, 'snapshots')
     index_path = os.path.join(lgit_path, 'index')
     config_path = os.path.join(lgit_path, 'config')
-
+    delta_timestamp = 0
+    delta_1st_sha1 = 15
+    delta_2nd_sha1 = 56
+    delta_3rd_sha1 = 97
     cmd, file = get_cmd()
     if 'init' in cmd:
         check_and_init()
     if 'status' in cmd:
-        check_status()
+        lgit_status()
     if 'commit' in cmd:
         check_and_commit()
     if 'add' in cmd:
-        add_a_file(file)
-
-
+        lgit_add(file)
 if __name__ == '__main__':
     main()
