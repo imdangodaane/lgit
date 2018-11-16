@@ -109,18 +109,43 @@ def get_readable_timestamp(file):
     return timestamp
 
 
-def get_info(file):
-    with open(file, 'r') as f:
-        content = f.read()
-        lines = content.split('\n')
-        for line in lines:
-            if len(line) > 0:
-                info = line.split()
-                yield info
+def get_all_files(dir_name=None):
+    files = []
+    list_dir = os.listdir(dir_name)
+    if '.lgit' in list_dir:
+        list_dir.remove('.lgit')
+    # Get all files and sub files in directories
+    if bool(list_dir):
+        for file in list_dir:
+            if dir_name:
+                name = os.path.join(dir_name, file)
+            else:
+                name = file
+            if os.path.isdir(name):
+                files += get_all_files(name)
+            if os.path.isfile(name):
+                files.append(name)
+    return files
+
+
+def get_tracked_files(file):
+    file_name = []
+    f = open(index_path, 'r+')
+    lines = f.readlines()
+    for line in lines:
+        file_name.append(line.split()[-1])
+    f.close()
+    return file_name
 
 
 def lgit_status(index_path):
-    
+    untracked_files = []
+    all_files = get_all_files()
+    tracked_files = get_tracked_files(index_path)
+    for file in all_files:
+        if file not in tracked_files:
+            untracked_files.append(file)
+
 
 
 def lgit_add(file_name):
@@ -159,7 +184,9 @@ def lgit_add(file_name):
             if len(line) > 0 and file_name == line.split()[-1]:
                 index = content.find(line)
                 break
-        if index:
+        if index == -1 or index == None:
+            f.write(init_info)
+        else:
             fd = os.open(index_path, os.O_RDWR)
             os.lseek(fd, index + delta_timestamp, 0)
             os.write(fd, time.encode())
@@ -168,8 +195,6 @@ def lgit_add(file_name):
             os.lseek(fd, index + delta_2nd_sha1, 0)
             os.write(fd, file_sha1.encode())
             os.close(fd)
-        else:
-            f.write(init_info)
     f.close()
 
 
@@ -229,16 +254,19 @@ def main():
     global lgit_path, objects_path, commits_path, snapshots_path, \
            index_path, config_path, delta_timestamp, delta_1st_sha1, \
            delta_2nd_sha1, delta_3rd_sha1
+
     lgit_path = os.path.realpath('.lgit')
     objects_path = os.path.join(lgit_path, 'objects')
     commits_path = os.path.join(lgit_path, 'commits')
     snapshots_path = os.path.join(lgit_path, 'snapshots')
     index_path = os.path.join(lgit_path, 'index')
     config_path = os.path.join(lgit_path, 'config')
+
     delta_timestamp = 0
     delta_1st_sha1 = 15
     delta_2nd_sha1 = 56
     delta_3rd_sha1 = 97
+
     cmd, file = get_cmd()
     if 'init' in cmd:
         check_and_init()
@@ -248,5 +276,7 @@ def main():
         check_and_commit()
     if 'add' in cmd:
         lgit_add(file)
+
+
 if __name__ == '__main__':
     main()
