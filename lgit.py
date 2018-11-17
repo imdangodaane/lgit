@@ -114,6 +114,8 @@ def get_all_files(dir_name=None):
     list_dir = os.listdir(dir_name)
     if '.lgit' in list_dir:
         list_dir.remove('.lgit')
+    if '.git' in list_dir:
+        list_dir.remove('.git')
     # Get all files and sub files in directories
     if bool(list_dir):
         for file in list_dir:
@@ -128,7 +130,7 @@ def get_all_files(dir_name=None):
     return files
 
 
-def get_tracked_files(file):
+def get_tracked_files():
     file_name = []
     f = open(index_path, 'r+')
     lines = f.readlines()
@@ -138,14 +140,125 @@ def get_tracked_files(file):
     return file_name
 
 
-def lgit_status(index_path):
-    untracked_files = []
+def print_untracked_files(files):
+    print('Untracked files:\n  (use "./lgit.py add <file>..." to include in \
+    what will be commited)\n')
+    for file in untracked_files:
+        print('\t\033[1;31m%s' % file)
+    print('\033[0;0m')
+
+
+def find_file_line(file_name, content):
+    for line in content.split('\n'):
+        if len(line) > 0 and file_name == line.split()[-1]:
+            return content.find(line)
+
+
+def update_index():
+    modified_files = []
+    deleted_files = []
+    f = open(index_path, 'r+')
+    content = f.read()
     all_files = get_all_files()
-    tracked_files = get_tracked_files(index_path)
+    if len(content) == 0 and len(all_files) == 0:
+        print('On branch master\n\nInitial commit\n\nnothing to commit\
+ (create/copy files and use ""./lgit.py add" to track)')
+        sys.exit()
+    lines = content.split('\n')
+    for line in lines:
+        if len(line) == 0:
+            continue
+        file_line = content.find(line)
+        tracked_file = line.split()[-1]
+        try:
+            fd = os.open(tracked_file, os.O_RDONLY)
+            os.close(fd)
+            file_mtime = get_readable_timestamp(tracked_file)
+            file_sha1 = get_sha1(tracked_file)
+            fd = os.open(index_path, os.O_RDWR)
+            os.lseek(fd, file_line, 0)
+            os.write(fd, file_mtime.encode())
+            os.lseek(fd, file_line + delta_1st_sha1, 0)
+            os.write(fd, file_sha1.encode() )
+            os.close(fd)
+        except FileNotFoundError:
+            deleted_files.append(tracked_file)
+        except PermissionError:
+            modified_files.append(tracked_file)
+    return modified_files, deleted_files
+
+
+def status_changes():
+    new_files = []
+    modified_files, deleted_files = update_index()
+    to_be_commit = []
+    not_staged = []
+    untracked_files = []
+
+    all_files = get_all_files()
+    tracked_files = get_tracked_files()
     for file in all_files:
         if file not in tracked_files:
             untracked_files.append(file)
 
+    f = open(index_path, 'r+')
+    lines = f.readlines()
+    for line in lines:
+        time = line[:14]
+        first_sha1 = line[15:55]
+        second_sha1 = line[56:96]
+        third_sha1 = line[97:137]
+        file_name = line.split()[-1]
+        if first_sha1 != second_sha1:
+            not_staged.append(file_name)
+            modified_files.append(file_name)
+        if second_sha1 != third_sha1:
+            to_be_commit.append(file_name)
+        if third_sha1 == ' ' * 40:
+            new_files.append(file_name)
+        # if len(line.split()) == 4:
+        #     new_files.append(line.split()[-1])
+        # if line.split()[1] == line.split()[2]:
+        #     to_be_commit.append(line.split()[-1])
+        # else:
+        #     modified_files.append(line.split()[-1])
+        #     not_staged.append(line.split()[-1])
+    print('On branch master\n\nInitial commit\n')
+    if to_be_commit:
+        print('Changes to be committed:\n  (use "./lgit rm --cached <file>..."\
+ to unstage)\n')
+        for file in to_be_commit:
+            if file in new_files:
+                print('\tnew file:   %s' % file)
+            elif file in modified_files:
+                print('modified:   %s' % file)
+            elif file in deleted_files:
+                print('deleted:   %s' % file)
+        print()
+    if not_staged:
+        print('Changes not staged for commit:\n  (use "./lgit.py add <file>...\
+ "to update what will be commited)\n  (use "./lgit.py checkout --<file>..." \
+to discard changes in working directory)\n')
+        for file in not_staged:
+            # if file in new_files:
+            #     print('\tnew file:   %s' % file)
+            if file in deleted_files:
+                print('\tdeleted:   %s' % file)
+            elif file in modified_files:
+                print('\tmodified:   %s' % file)
+
+        print()
+
+    if untracked_files:
+        print('Untracked files:\n  (use "./lgit.py add <file>..." to include \
+in what will be commited)\n')
+        for file in untracked_files:
+            print('\033[1;31m\t%s' % file)
+        print()
+
+
+def lgit_status():
+    status_changes()
 
 
 def lgit_add(file_name):
@@ -203,7 +316,7 @@ def staging_index(file_name):
 
 
 def check_and_commit():
-    print("I'm comming here!")
+    pass
 
 
 def re_init():
