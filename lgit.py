@@ -161,24 +161,26 @@ def update_index():
     content = f.read()
     all_files = get_all_files()
     if len(content) == 0 and len(all_files) == 0:
-        print('On branch master\n\nInitial commit\n\nnothing to commit\
- (create/copy files and use ""./lgit.py add" to track)')
+        print('On branch master\n\nInitial commit\n\nnothing to commit \
+(create/copy files and use ""./lgit.py add" to track)')
         sys.exit()
     lines = content.split('\n')
     for line in lines:
         if len(line) == 0:
             continue
-        file_line = content.find(line)
+        line_index = content.find(line)
         tracked_file = line.split()[-1]
         try:
             fd = os.open(tracked_file, os.O_RDONLY)
             os.close(fd)
             file_mtime = get_readable_timestamp(tracked_file)
             file_sha1 = get_sha1(tracked_file)
+            if file_sha1 != line.split()[1]:
+                modified_files.append(tracked_file)
             fd = os.open(index_path, os.O_RDWR)
-            os.lseek(fd, file_line, 0)
+            os.lseek(fd, line_index, 0)
             os.write(fd, file_mtime.encode())
-            os.lseek(fd, file_line + delta_1st_sha1, 0)
+            os.lseek(fd, line_index + delta_1st_sha1, 0)
             os.write(fd, file_sha1.encode() )
             os.close(fd)
         except FileNotFoundError:
@@ -211,7 +213,6 @@ def status_changes():
         file_name = line.split()[-1]
         if first_sha1 != second_sha1:
             not_staged.append(file_name)
-            modified_files.append(file_name)
         if second_sha1 != third_sha1:
             to_be_commit.append(file_name)
         if third_sha1 == ' ' * 40:
@@ -229,12 +230,12 @@ def status_changes():
  to unstage)\n')
         for file in to_be_commit:
             if file in new_files:
-                print('\tnew file:   %s' % file)
+                print('\033[0;32m\tnew file:   %s' % file)
             elif file in modified_files:
-                print('modified:   %s' % file)
+                print('\033[0;32m\tmodified:   %s' % file)
             elif file in deleted_files:
-                print('deleted:   %s' % file)
-        print()
+                print('\033[0;31m\tdeleted:   %s' % file)
+        print('\033[0m]')
     if not_staged:
         print('Changes not staged for commit:\n  (use "./lgit.py add <file>...\
  "to update what will be commited)\n  (use "./lgit.py checkout --<file>..." \
@@ -243,18 +244,18 @@ to discard changes in working directory)\n')
             # if file in new_files:
             #     print('\tnew file:   %s' % file)
             if file in deleted_files:
-                print('\tdeleted:   %s' % file)
+                print('\033[0;31m\tdeleted:   %s' % file)
             elif file in modified_files:
-                print('\tmodified:   %s' % file)
+                print('\033[0;31m\tmodified:   %s' % file)
 
-        print()
+        print('\033[0m]')
 
     if untracked_files:
         print('Untracked files:\n  (use "./lgit.py add <file>..." to include \
 in what will be commited)\n')
         for file in untracked_files:
-            print('\033[1;31m\t%s' % file)
-        print()
+            print('\033[0;31m\t%s' % file)
+        print('\033[0m]')
 
 
 def lgit_status():
