@@ -45,7 +45,6 @@ def get_cmd():
     log_parser.add_argument('log', action='store_true')
 
     args = parser.parse_args()
-    print(args)
 
     if 'init' in args:
         return 'init', None
@@ -68,10 +67,12 @@ def get_cmd():
         sys.exit()
 
 
-def get_sha1(file):
+def lgit_get(file, cmd):
     # Open and get content from the file
     try:
         fd = os.open(file, os.O_RDONLY)
+        file_content = os.read(fd, os.stat(file).st_size)
+        os.close(fd)
     except PermissionError:
         print('error: open("%s"): Permission denied' % file)
         print('error: unable to index file test')
@@ -80,44 +81,33 @@ def get_sha1(file):
     except FileNotFoundError:
         print("fatal: pathspec '%s' did not match any files" % file)
         sys.exit()
-    file_content = os.read(fd, os.stat(file).st_size)
-    os.close(fd)
-    # Get SHA1 hash from the file (before add)
-    return hashlib.sha1(file_content).hexdigest()
-
-
-def get_content(file):
-    # Open and get content from the file
-    try:
-        fd = os.open(file, os.O_RDONLY)
-    except PermissionError:
-        print('error: open("%s"): Permission denied' % file)
-        print('error: unable to index file test')
-        print('fatal: adding files failed')
+    if cmd == 'content':
+        return file_content
+    elif cmd == 'sha1':
+        return hashlib.sha1(file_content).hexdigest()
+    elif cmd == 'tracked_files':
+        tracked_files = []
+        lines = file_content.decode().split('\n')
+        for line in lines:
+            if len(line) > 0:
+                tracked_files.append(line.split()[-1])
+        return tracked_files
+    elif cmd == 'timestamp':
+        dt = datetime.datetime.fromtimestamp(os.stat(file).st_mtime)
+        return dt.strftime('%Y%m%d%H%M%S')
+    else:
+        print('Please add command to lgit_get')
         sys.exit()
-    except FileNotFoundError:
-        print("fatal: pathspec '%s' did not match any files" % file)
-        sys.exit()
-    return os.read(fd, os.stat(file).st_size)
-
-
-def get_readable_timestamp(file):
-    mtime = os.stat(file).st_mtime
-    timestamp = str(datetime.datetime.fromtimestamp(mtime))[:19]
-    for i in timestamp:
-        if not i.isnumeric():
-            timestamp = timestamp.replace(i, '')
-    return timestamp
 
 
 def get_all_files(dir_name=None):
+    # Get all files and sub files in directories
     files = []
     list_dir = os.listdir(dir_name)
     if '.lgit' in list_dir:
         list_dir.remove('.lgit')
     if '.git' in list_dir:
         list_dir.remove('.git')
-    # Get all files and sub files in directories
     if bool(list_dir):
         for file in list_dir:
             if dir_name:
@@ -129,16 +119,6 @@ def get_all_files(dir_name=None):
             if os.path.isfile(name):
                 files.append(name)
     return files
-
-
-def get_tracked_files():
-    file_name = []
-    f = open(index_path, 'r+')
-    lines = f.readlines()
-    for line in lines:
-        file_name.append(line.split()[-1])
-    f.close()
-    return file_name
 
 
 def find_file_line(file_name, content):
@@ -166,11 +146,11 @@ def update_index():
         try:
             fd = os.open(tracked_file, os.O_RDONLY)
             os.close(fd)
-            file_mtime = get_readable_timestamp(tracked_file)
-            file_sha1 = get_sha1(tracked_file)
+            file_mtime = lgit_get(tracked_file, 'timestamp')
+            file_sha1 = lgit_get(tracked_file, 'sha1')
             if file_sha1 != line.split()[2]:
                 modified_files.append(tracked_file)
-            fd = os.open(index_path, os.O_RDWR)
+            fd = os.open(index_path, os.O_WRONLY)
             os.lseek(fd, line_index, 0)
             os.write(fd, file_mtime.encode())
             os.lseek(fd, line_index + delta_1st_sha1, 0)
@@ -263,10 +243,10 @@ def lgit_status():
 
 def lgit_add(file_name):
     # Get file content
-    file_content = get_content(file_name)
+    file_content = lgit_get(file_name, 'content')
     # Get readable timestamp of file
-    time = get_readable_timestamp(file_name)
-    file_sha1 = get_sha1(file_name)
+    time = lgit_get(file_name, 'timestamp')
+    file_sha1 = lgit_get(file_name, 'sha1')
     init_info = (time + ' ' + file_sha1 + ' ' + file_sha1 + ' ' + ' ' * 40 +
                  ' ' + file_name + '\n')
     index = None
@@ -375,17 +355,12 @@ commits yet")
 
 def lgit_rm(file_name):
     # Find file if exist and remove file from staging index
-    f = open(index_path, 'r')
-    content = f.read()
-    f.close()
-    file_name_list = []
-    lines = content.split('\n')
-    for line in lines:
-        if len(line) > 0:
-            file_name_list.append(line.split()[-1])
-    if file_name not in file_name_list:
+    content = lgit_get(index_path, 'content')
+    tracked_files = lgit_get(index_path, 'tracked_files')
+    if file_name not in tracked_files:
         print("fatal: pathspec '%s' did not match any files" % file_name)
         sys.exit()
+    lines = content.split('\n')
     for i in range(len(lines)):
         if len(lines[i]) > 0:
             if file_name == lines[i].split()[-1]:
@@ -399,36 +374,34 @@ def lgit_rm(file_name):
     for line in lines:
         if len(line) > 0:
             f.write(line + '\n')
+    f.close()
 
 
 def lgit_config(name):
     f = open(config_path, 'w')
     f.write('LOGNAME=' + name)
-    print('Config author name completed')
+    f.close()
 
 
 def lgit_ls_files():
-    f = open(index_path, 'r')
-    content = f.read()
-    f.close()
-    lines = content.split('\n')
-    for line in lines:
-        if len(line) > 0:
-            print(line.split()[-1])
+    files = lgit_get(index_path, 'tracked_files')
+    for file in files:
+        print(file)
 
 
 def re_init():
-    print('Reinitialized existing Git repository in %s'
+    print('Reinitialized existing lgit repository in %s'
           % os.path.realpath('.lgit'))
 
 
 def check_and_init():
     if os.path.exists('.lgit'):
-        if os.path.isdir('.lgit'):
-            re_init()
-        elif os.path.isfile('.lgit'):
+        if os.path.isfile('.lgit'):
             print('fatal: Invalid gitfile format: %s'
                   % os.path.realpath('.lgit'))
+            sys.exit()
+        if os.path.isdir('.lgit'):
+            re_init()
     else:
         lgit_init()
 
@@ -445,22 +418,26 @@ def lgit_init():
         + index
         + config (contain name of the author (environment variable: LOGNAME))
     '''
-    # Make .lgit directory
-    os.mkdir(lgit_path)
-    # Make dirs of .lgit directory
-    os.mkdir(objects_path)
-    os.mkdir(commits_path)
-    os.mkdir(snapshots_path)
-    # Make files of .lgit directory
-    os.mknod(index_path, mode=0o644)
-    os.mknod(config_path, mode=0o644)
-    # Write LOGNAME (current user) into config
-    fd = os.open(os.path.join(lgit_path, 'config'), os.O_WRONLY)
-    log_name = 'LOGNAME=' + os.environ['LOGNAME']
-    os.write(fd, log_name.encode())
-    os.close(fd)
-    # Print initialized success
-    print('Initialized empty Git repository in %s' % lgit_path)
+    dirs = [
+            '.lgit',
+            '.lgit/objects',
+            '.lgit/commits',
+            '.lgit/snapshots'
+    ]
+    files = [
+             '.lgit/index',
+             '.lgit/config'
+    ]
+    for dir in dirs:
+        os.mkdir(dir)
+    for file in files:
+        os.mknode(file)
+        if file == '.lgit/config':
+            fd = os.open(file, os.O_WRONLY)
+            os.write(fd, ('LOGNAME=' + os.environ['LOGNAME']).encode())
+            os.close(fd)
+    print('Initialized empty lgit repository in %s' \
+    % os.path.realpath('.lgit'))
 
 
 def main():
