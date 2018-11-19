@@ -175,7 +175,7 @@ def update_index():
             os.close(fd)
             file_mtime = get_readable_timestamp(tracked_file)
             file_sha1 = get_sha1(tracked_file)
-            if file_sha1 != line.split()[1]:
+            if file_sha1 != line.split()[2]:
                 modified_files.append(tracked_file)
             fd = os.open(index_path, os.O_RDWR)
             os.lseek(fd, line_index, 0)
@@ -211,12 +211,13 @@ def status_changes():
         second_sha1 = line[56:96]
         third_sha1 = line[97:137]
         file_name = line.split()[-1]
-        if first_sha1 != second_sha1:
-            not_staged.append(file_name)
-        if second_sha1 != third_sha1:
-            to_be_commit.append(file_name)
         if third_sha1 == ' ' * 40:
             new_files.append(file_name)
+        if second_sha1 != third_sha1:
+            to_be_commit.append(file_name)
+            modified_files.append(file_name)
+        if first_sha1 != second_sha1:
+            not_staged.append(file_name)
         # if len(line.split()) == 4:
         #     new_files.append(line.split()[-1])
         # if line.split()[1] == line.split()[2]:
@@ -224,10 +225,12 @@ def status_changes():
         # else:
         #     modified_files.append(line.split()[-1])
         #     not_staged.append(line.split()[-1])
-    print('On branch master\n\nInitial commit\n')
+    print('On branch master')
+    if len(os.listdir(commits_path)) == 0:
+        print('\n\nNo commits yet\n')
     if to_be_commit:
-        print('Changes to be committed:\n  (use "./lgit rm --cached <file>..."\
- to unstage)\n')
+        print('Changes to be committed:\n  (use "./lgit.py reset HEAD ..." \
+to unstage)\n')
         for file in to_be_commit:
             if file in new_files:
                 print('\033[0;32m\tnew file:   %s' % file)
@@ -235,10 +238,10 @@ def status_changes():
                 print('\033[0;32m\tmodified:   %s' % file)
             elif file in deleted_files:
                 print('\033[0;31m\tdeleted:   %s' % file)
-        print('\033[0m]')
+        print('\033[0m')
     if not_staged:
-        print('Changes not staged for commit:\n  (use "./lgit.py add <file>...\
- "to update what will be commited)\n  (use "./lgit.py checkout --<file>..." \
+        print('Changes not staged for commit:\n  (use "./lgit.py add ..." \
+to update what will be commited)\n  (use "./lgit.py checkout -- ..." \
 to discard changes in working directory)\n')
         for file in not_staged:
             # if file in new_files:
@@ -248,14 +251,17 @@ to discard changes in working directory)\n')
             elif file in modified_files:
                 print('\033[0;31m\tmodified:   %s' % file)
 
-        print('\033[0m]')
-
+        print('\033[0m')
     if untracked_files:
         print('Untracked files:\n  (use "./lgit.py add <file>..." to include \
 in what will be commited)\n')
         for file in untracked_files:
             print('\033[0;31m\t%s' % file)
-        print('\033[0m]')
+        print('\033[0m')
+
+    if not not_staged:
+        print('no changes added to commit (use ".lgit.py add and/or "\
+.lgit.py commit -a")')
 
 
 def lgit_status():
@@ -269,7 +275,7 @@ def lgit_add(file_name):
     time = get_readable_timestamp(file_name)
     file_sha1 = get_sha1(file_name)
     init_info = time + ' ' + file_sha1 + ' ' + file_sha1 + ' ' + ' ' * 40 + \
-    file_name + '\n'
+    ' ' + file_name + '\n'
     index = None
     # Create directory contain file to store by SHA1 hash
     try:
