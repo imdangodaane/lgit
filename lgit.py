@@ -17,11 +17,11 @@ def get_cmd():
 
     add_parser = sub_parsers.add_parser('add', help='Add file content to \
     the index')
-    add_parser.add_argument('add')
+    add_parser.add_argument('add', nargs='+', action='store')
 
     rm_parser = sub_parsers.add_parser('rm', help='Remove files from the \
     index')
-    rm_parser.add_argument('rm', action='store_true')
+    rm_parser.add_argument('rm')
 
     config_parser = sub_parsers.add_parser('config', help='Get and set \
     repository or global options')
@@ -45,6 +45,7 @@ def get_cmd():
     log_parser.add_argument('log', action='store_true')
 
     args = parser.parse_args()
+    print(args)
 
     if 'init' in args:
         return 'init', None
@@ -53,9 +54,9 @@ def get_cmd():
     if 'rm' in args:
         return 'rm', args.rm
     if 'config' in args:
-        return 'config', None
+        return 'config', args.author
     if 'commit' in args:
-        return 'commit', None
+        return 'commit', args.m
     if 'status' in args:
         return 'status', None
     if 'ls_files' in args:
@@ -181,7 +182,7 @@ def update_index():
             os.lseek(fd, line_index, 0)
             os.write(fd, file_mtime.encode())
             os.lseek(fd, line_index + delta_1st_sha1, 0)
-            os.write(fd, file_sha1.encode() )
+            os.write(fd, file_sha1.encode())
             os.close(fd)
         except FileNotFoundError:
             deleted_files.append(tracked_file)
@@ -227,7 +228,7 @@ def status_changes():
         #     not_staged.append(line.split()[-1])
     print('On branch master')
     if len(os.listdir(commits_path)) == 0:
-        print('\n\nNo commits yet\n')
+        print('\nNo commits yet\n')
     if to_be_commit:
         print('Changes to be committed:\n  (use "./lgit.py reset HEAD ..." \
 to unstage)\n')
@@ -274,8 +275,8 @@ def lgit_add(file_name):
     # Get readable timestamp of file
     time = get_readable_timestamp(file_name)
     file_sha1 = get_sha1(file_name)
-    init_info = time + ' ' + file_sha1 + ' ' + file_sha1 + ' ' + ' ' * 40 + \
-    ' ' + file_name + '\n'
+    init_info = (time + ' ' + file_sha1 + ' ' + file_sha1 + ' ' + ' ' * 40 +
+                 ' ' + file_name + '\n')
     index = None
     # Create directory contain file to store by SHA1 hash
     try:
@@ -287,8 +288,8 @@ def lgit_add(file_name):
     except FileExistsError:
         pass
     # Write content to the file stored in lgit database
-    fd = os.open(os.path.join(objects_path, file_sha1[:2], file_sha1[2:]), \
-    os.O_WRONLY)
+    fd = os.open(os.path.join(objects_path, file_sha1[:2], file_sha1[2:]),
+                 os.O_WRONLY)
     os.write(fd, file_content)
     os.close(fd)
     # Write file information to index file
@@ -304,7 +305,7 @@ def lgit_add(file_name):
             if len(line) > 0 and file_name == line.split()[-1]:
                 index = content.find(line)
                 break
-        if index == -1 or index == None:
+        if index == -1 or index is None:
             f.write(init_info)
         else:
             fd = os.open(index_path, os.O_RDWR)
@@ -318,17 +319,117 @@ def lgit_add(file_name):
     f.close()
 
 
-def staging_index(file_name):
-    pass
+def commit_update_index():
+    f = open(index_path, 'r+')
+    content = f.read()
+    f.close()
+    lines = content.split('\n')
+    fd = os.open(index_path, os.O_WRONLY)
+    for line in lines:
+        if len(line) > 0:
+            line_index = content.find(line)
+            second_sha1 = line.split()[2]
+            os.lseek(fd, line_index + delta_3rd_sha1, 0)
+            os.write(fd, second_sha1.encode())
+    os.close(fd)
 
 
-def check_and_commit():
-    pass
+def lgit_commit(message):
+    timestamp = datetime.datetime.today().strftime('%Y%m%d%H%M%S.%f')
+    f = open(config_path, 'r')
+    author_name = f.read().split('=')[1]
+    f.close()
+    commit_update_index()
+    commit_name = os.path.join(commits_path, timestamp)
+    snap_name = os.path.join(snapshots_path, timestamp)
+    os.mknod(commit_name, mode=0o644)
+    os.mknod(snap_name, mode=0o644)
+    f = open(commit_name, 'r+')
+    f.write(author_name + '\n' + timestamp[:14] + '\n\n' + message + '\n\n')
+    f.close()
+    f = open(index_path, 'r+')
+    content = f.read()
+    f.close()
+    lines = content.split('\n')
+    f = open(snap_name, 'r+')
+    for line in lines:
+        if len(line) > 0:
+            info = line[delta_3rd_sha1:]
+            f.write(info + '\n')
+    f.close()
+
+
+def lgit_log():
+    temp = os.listdir(commits_path)
+    if len(temp) == 0:
+        print("fatal: your current branch 'master' does not have any \
+commits yet")
+        sys.exit()
+    for name in temp:
+        commit_name = os.path.join(commits_path, name)
+        f = open(commit_name, 'r')
+        content = f.read()
+        f.close()
+        author_name = content.split('\n')[0]
+        tim = content.split('\n')[1]
+        commit_message = content.split('\n')[3]
+        date = datetime.datetime.strptime(tim, '%Y%m%d%H%M%S')
+        date = date.strftime('%a %b %d %H:%M:%S %Y')
+        print('commit', name)
+        print('Author:', author_name)
+        print('Date:', date)
+        print('\n\t%s\n\n' % commit_message)
+
+
+def lgit_rm(file_name):
+    # Find file if exist and remove file from staging index
+    f = open(index_path, 'r')
+    content = f.read()
+    f.close()
+    file_name_list = []
+    lines = content.split('\n')
+    for line in lines:
+        if len(line) > 0:
+            file_name_list.append(line.split()[-1])
+    if file_name not in file_name_list:
+        print("fatal: pathspec '%s' did not match any files" % file_name)
+        sys.exit()
+    for i in range(len(lines)):
+        if len(lines[i]) > 0:
+            if file_name == lines[i].split()[-1]:
+                lines.remove(lines[i])
+                # Remove file from current working directory
+                if os.path.exists(file_name):
+                    os.remove(file_name)
+                break
+    # Write new info to index
+    f = open(index_path, 'w')
+    for line in lines:
+        if len(line) > 0:
+            f.write(line + '\n')
+
+
+def lgit_config(name):
+    f = open(config_path, 'w')
+    f.write('LOGNAME=' + name)
+    print('Config author name completed')
+
+
+def lgit_ls_files():
+    f = open(index_path, 'r')
+    content = f.read()
+    f.close()
+    lines = content.split('\n')
+    for line in lines:
+        if len(line) > 0:
+            print(line.split()[-1])
 
 
 def re_init():
     print('Reinitialized existing Git repository in %s'
           % os.path.realpath('.lgit'))
+
+
 def check_and_init():
     if os.path.exists('.lgit'):
         if os.path.isdir('.lgit'):
@@ -393,9 +494,17 @@ def main():
     if 'status' in cmd:
         lgit_status()
     if 'commit' in cmd:
-        check_and_commit()
+        lgit_commit(file)
     if 'add' in cmd:
         lgit_add(file)
+    if 'rm' in cmd:
+        lgit_rm(file)
+    if 'config' in cmd:
+        lgit_config(file)
+    if 'ls_files' in cmd:
+        lgit_ls_files()
+    if 'log' in cmd:
+        lgit_log()
 
 
 if __name__ == '__main__':

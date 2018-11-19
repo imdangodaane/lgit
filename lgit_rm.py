@@ -3,6 +3,7 @@ import os
 import argparse
 import time
 import datetime
+import sys
 
 
 def get_cmd():
@@ -20,7 +21,8 @@ def get_cmd():
 
     rm_parser = sub_parsers.add_parser('rm', help='Remove files from the \
     index')
-    rm_parser.add_argument('rm', action='store_true')
+    rm_parser.add_argument('rm')
+
 
     config_parser = sub_parsers.add_parser('config', help='Get and set \
     repository or global options')
@@ -29,7 +31,6 @@ def get_cmd():
 
     commit_parser = sub_parsers.add_parser('commit', help='Record changes \
     to the directory')
-    commit_parser.add_argument('commit', action='store_true')
     commit_parser.add_argument('-m', help='message help')
 
     status_parser = sub_parsers.add_parser('status', help='Show the working \
@@ -52,9 +53,9 @@ def get_cmd():
     if 'rm' in args:
         return 'rm', args.rm
     if 'config' in args:
-        return 'config', None
+        return 'config', args.author
     if 'commit' in args:
-        return 'commit', args.m
+        return 'commit', None
     if 'status' in args:
         return 'status', None
     if 'ls_files' in args:
@@ -66,45 +67,33 @@ def get_cmd():
         sys.exit()
 
 
-def commit_update_index():
-    f = open(index_path, 'r+')
+def lgit_rm(file_name):
+    # Find file if exist and remove file from staging index
+    f = open(index_path, 'r')
     content = f.read()
     f.close()
+    file_name_list = []
     lines = content.split('\n')
-    fd = os.open(index_path, os.O_WRONLY)
     for line in lines:
         if len(line) > 0:
-            line_index = content.find(line)
-            second_sha1 = line.split()[2]
-            os.lseek(fd, line_index + delta_3rd_sha1, 0)
-            os.write(fd, second_sha1.encode())
-    os.close(fd)
-
-
-def lgit_commit(message):
-    timestamp = datetime.datetime.today().strftime('%Y%m%d%H%M%S.%f')
-    f = open(config_path, 'r')
-    author_name = f.read().split('=')[1]
-    f.close()
-    commit_update_index()
-    commit_name = os.path.join(commits_path, timestamp)
-    snap_name = os.path.join(snapshots_path, timestamp)
-    os.mknod(commit_name, mode=0o644)
-    os.mknod(snap_name, mode=0o644)
-    f = open(commit_name, 'r+')
-    f.write(author_name + '\n' + timestamp[:14] + '\n\n' + message + '\n\n')
-    f.close()
-    f = open(index_path, 'r+')
-    content = f.read()
-    f.close()
-    lines = content.split('\n')
-    f = open(snap_name, 'r+')
+            file_name_list.append(line.split()[-1])
+    if file_name not in file_name_list:
+        print("fatal: pathspec '%s' did not match any files" % file_name)
+        sys.exit()
+    for i in range(len(lines)):
+        if len(lines[i]) > 0:
+            if file_name == lines[i].split()[-1]:
+                lines.remove(lines[i])
+                # Remove file from current working directory
+                if os.path.exists(file_name):
+                    os.remove(file_name)
+                break
+    # Write new info to index
+    f = open(index_path, 'w')
     for line in lines:
         if len(line) > 0:
-            info = line[delta_3rd_sha1:]
-            f.write(info + '\n')
-    f.close()
-
+            f.write(line + '\n')
+    print('Remove file completed')
 
 
 def main():
@@ -133,6 +122,8 @@ def main():
         lgit_commit(file)
     if 'add' in cmd:
         lgit_add(file)
+    if 'rm' in cmd:
+        lgit_rm(file)
 
 
 if __name__ == '__main__':
