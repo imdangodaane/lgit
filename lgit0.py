@@ -81,8 +81,10 @@ def lgit_get(file, cmd):
     except FileNotFoundError:
         print("fatal: pathspec '%s' did not match any files" % file)
         sys.exit()
-    if cmd == 'content':
+    if cmd == 'content_byte':
         return file_content
+    elif cmd == 'content_str':
+        return file_content.decode()
     elif cmd == 'sha1':
         return hashlib.sha1(file_content).hexdigest()
     elif cmd == 'tracked_files':
@@ -101,13 +103,13 @@ def lgit_get(file, cmd):
 
 
 def get_all_files(dir_name=None):
-    # Get all files and sub files in directories
     files = []
+    # Get all files and sub files in directories
     list_dir = os.listdir(dir_name)
-    if '.lgit' in list_dir:
-        list_dir.remove('.lgit')
     if '.git' in list_dir:
         list_dir.remove('.git')
+    if '.lgit' in list_dir:
+        list_dir.remove('.lgit')
     if bool(list_dir):
         for file in list_dir:
             if dir_name:
@@ -128,15 +130,23 @@ def find_file_line(file_name, content):
 
 
 def update_index():
+    '''
+    This function update new SHA1 of file to index if there's change in file
+    and handle error of file if it was deleted or modified
+    Return two fields of files:
+    - Deleted files
+    - Modified files
+    '''
     modified_files = []
     deleted_files = []
-    f = open(index_path, 'r+')
-    content = f.read()
+    content = lgit_get(index_path, 'content_str')
     all_files = get_all_files()
+    # Handle error if index is an empty file
     if len(content) == 0 and len(all_files) == 0:
         print('On branch master\n\nInitial commit\n\nnothing to commit \
 (create/copy files and use ""./lgit.py add" to track)')
         sys.exit()
+    # Else:
     lines = content.split('\n')
     for line in lines:
         if len(line) == 0:
@@ -163,27 +173,36 @@ def update_index():
     return modified_files, deleted_files
 
 
-def status_changes():
+def lgit_status():
+    '''
+    This function include multiple action to show the status of lgit
+    - Update index if file was be modified
+    - Show status of untrack files, to be commited and not stage for commit
+    files
+    '''
     new_files = []
     modified_files, deleted_files = update_index()
+
     to_be_commit = []
     not_staged = []
     untracked_files = []
 
     all_files = get_all_files()
-    tracked_files = get_tracked_files()
+    tracked_files = lgit_get(index_path, 'tracked_files')
+
     for file in all_files:
         if file not in tracked_files:
             untracked_files.append(file)
 
-    f = open(index_path, 'r+')
-    lines = f.readlines()
+    content = lgit_get(index_path, 'content_str')
+    lines = content.split('\n')
     for line in lines:
         time = line[:14]
         first_sha1 = line[15:55]
         second_sha1 = line[56:96]
         third_sha1 = line[97:137]
         file_name = line.split()[-1]
+        # Find group of file
         if third_sha1 == ' ' * 40:
             new_files.append(file_name)
         if second_sha1 != third_sha1:
@@ -191,16 +210,11 @@ def status_changes():
             modified_files.append(file_name)
         if first_sha1 != second_sha1:
             not_staged.append(file_name)
-        # if len(line.split()) == 4:
-        #     new_files.append(line.split()[-1])
-        # if line.split()[1] == line.split()[2]:
-        #     to_be_commit.append(line.split()[-1])
-        # else:
-        #     modified_files.append(line.split()[-1])
-        #     not_staged.append(line.split()[-1])
+    # Print HEAD
     print('On branch master')
     if len(os.listdir(commits_path)) == 0:
         print('\nNo commits yet\n')
+    # Print change to be commited files
     if to_be_commit:
         print('Changes to be committed:\n  (use "./lgit.py reset HEAD ..." \
 to unstage)\n')
@@ -212,6 +226,7 @@ to unstage)\n')
             elif file in deleted_files:
                 print('\033[0;31m\tdeleted:   %s' % file)
         print('\033[0m')
+    # Print not staged for commit files
     if not_staged:
         print('Changes not staged for commit:\n  (use "./lgit.py add ..." \
 to update what will be commited)\n  (use "./lgit.py checkout -- ..." \
@@ -223,27 +238,23 @@ to discard changes in working directory)\n')
                 print('\033[0;31m\tdeleted:   %s' % file)
             elif file in modified_files:
                 print('\033[0;31m\tmodified:   %s' % file)
-
         print('\033[0m')
+    # Print untracked files
     if untracked_files:
         print('Untracked files:\n  (use "./lgit.py add <file>..." to include \
 in what will be commited)\n')
         for file in untracked_files:
             print('\033[0;31m\t%s' % file)
         print('\033[0m')
-
+    # If there're no not stage files, print no changes...
     if not not_staged:
         print('no changes added to commit (use ".lgit.py add and/or "\
 .lgit.py commit -a")')
 
 
-def lgit_status():
-    status_changes()
-
-
 def lgit_add(file_name):
     # Get file content
-    file_content = lgit_get(file_name, 'content')
+    file_content = lgit_get(file_name, 'content_byte')
     # Get readable timestamp of file
     time = lgit_get(file_name, 'timestamp')
     file_sha1 = lgit_get(file_name, 'sha1')
@@ -292,9 +303,10 @@ def lgit_add(file_name):
 
 
 def commit_update_index():
-    f = open(index_path, 'r+')
-    content = f.read()
-    f.close()
+    '''
+    This function update index (update the third sha1 to index file)
+    '''
+    content = lgit_get(index_path, 'content_str')
     lines = content.split('\n')
     fd = os.open(index_path, os.O_WRONLY)
     for line in lines:
@@ -319,15 +331,12 @@ def lgit_commit(message):
     f = open(commit_name, 'r+')
     f.write(author_name + '\n' + timestamp[:14] + '\n\n' + message + '\n\n')
     f.close()
-    f = open(index_path, 'r+')
-    content = f.read()
-    f.close()
+    content = lgit_get(index_path, 'content_str')
     lines = content.split('\n')
     f = open(snap_name, 'r+')
     for line in lines:
         if len(line) > 0:
-            info = line[delta_3rd_sha1:]
-            f.write(info + '\n')
+            f.write(line[delta_3rd_sha1:] + '\n')
     f.close()
 
 
@@ -440,12 +449,24 @@ def lgit_init():
     % os.path.realpath('.lgit'))
 
 
+def find_lgit_dir():
+    path = os.getcwd()
+    dirs = os.listdir(path)
+    while '.lgit' not in dirs:
+        path = os.path.dirname(os.getcwd())
+        os.chdir(path)
+        dirs = os.listdir()
+        if path == '/home' and '.lgit' not in dirs:
+            return None
+    return path
+
+
 def main():
     global lgit_path, objects_path, commits_path, snapshots_path, \
            index_path, config_path, delta_timestamp, delta_1st_sha1, \
            delta_2nd_sha1, delta_3rd_sha1
 
-    lgit_path = os.path.realpath('.lgit')
+    lgit_path = find_lgit_dir()
     objects_path = os.path.join(lgit_path, 'objects')
     commits_path = os.path.join(lgit_path, 'commits')
     snapshots_path = os.path.join(lgit_path, 'snapshots')
