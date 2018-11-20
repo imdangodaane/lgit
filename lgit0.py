@@ -440,7 +440,7 @@ def lgit_init():
     for dir in dirs:
         os.mkdir(dir)
     for file in files:
-        os.mknode(file)
+        os.mknod(file)
         if file == '.lgit/config':
             fd = os.open(file, os.O_WRONLY)
             os.write(fd, ('LOGNAME=' + os.environ['LOGNAME']).encode())
@@ -466,12 +466,16 @@ def main():
            index_path, config_path, delta_timestamp, delta_1st_sha1, \
            delta_2nd_sha1, delta_3rd_sha1
 
+    cwd = os.getcwd()
     lgit_path = find_lgit_dir()
-    objects_path = os.path.join(lgit_path, 'objects')
-    commits_path = os.path.join(lgit_path, 'commits')
-    snapshots_path = os.path.join(lgit_path, 'snapshots')
-    index_path = os.path.join(lgit_path, 'index')
-    config_path = os.path.join(lgit_path, 'config')
+    if lgit_path:
+        objects_path = os.path.join(lgit_path, 'objects')
+        commits_path = os.path.join(lgit_path, 'commits')
+        snapshots_path = os.path.join(lgit_path, 'snapshots')
+        index_path = os.path.join(lgit_path, 'index')
+        config_path = os.path.join(lgit_path, 'config')
+    else:
+        os.chdir(cwd)
 
     delta_timestamp = 0
     delta_1st_sha1 = 15
